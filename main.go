@@ -15,7 +15,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"net"
@@ -26,10 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prusa3d/prusa-connect/sdk/deviceapi"
 	"github.com/prusa3d/prusa-connect/sdk/extension"
 	"github.com/prusa3d/prusa-connect/sdk/routesapi"
-	"github.com/prusa3d/prusa-connect/sdk/storageapi"
 	"github.com/prusa3d/prusa-connect/sdk/wire"
 	"github.com/prusa3d/prusa-connect/sdk/wirerpc"
 )
@@ -81,9 +78,7 @@ func run() error {
 	}
 
 	held := &module{
-		devices: deviceapi.NewClient(conn),
-		files:   storageapi.NewClient(conn),
-		log:     slog.New(slog.NewTextHandler(os.Stderr, nil)).With("module", name),
+		log: slog.New(slog.NewTextHandler(os.Stderr, nil)).With("module", name),
 	}
 	defer held.stop()
 
@@ -98,25 +93,13 @@ func run() error {
 	return nil
 }
 
-// Devices is the part of the host's fleet API this module calls.
-type Devices interface {
-	List(ctx context.Context, params deviceapi.ListParams) (deviceapi.Page, error)
-	Print(ctx context.Context, params deviceapi.PrintParams) (deviceapi.Started, error)
-}
-
-// Files is the part of the host's storage API this module calls.
-type Files interface {
-	Write(ctx context.Context, params storageapi.WriteParams, body io.Reader) (storageapi.Written, error)
-}
-
 // module is everything the process holds once the host sent its settings.
 type module struct {
-	devices Devices
-	files   Files
-	log     *slog.Logger
+	log *slog.Logger
 
 	mu       sync.Mutex
 	settings Settings
+	connect  *connectClient
 	dataDir  string
 	port     int
 	problem  string
@@ -153,7 +136,13 @@ func (m *module) configure(_ context.Context, sent Settings, grants wirerpc.Gran
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	connect, err := newConnectClient(sent.ConnectURL)
+	if err != nil {
+		return err
+	}
+
 	m.settings = sent
+	m.connect = connect
 
 	if m.server != nil {
 		return nil
@@ -221,13 +210,13 @@ func (m *module) stop() {
 	_ = server.Shutdown(ctx)
 }
 
-// current returns the settings, the data directory and whether the listener
-// is up, under the lock.
-func (m *module) current() (Settings, string) {
+// current returns the settings, the Connect client and the data directory,
+// under the lock.
+func (m *module) current() (Settings, *connectClient, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.settings, m.dataDir
+	return m.settings, m.connect, m.dataDir
 }
 
 // hostRoutes are the routes under /api/v1/modules/<namespace>/, authorized by
@@ -243,7 +232,7 @@ func (m *module) hostRoutes() http.Handler {
 			"serving":     m.server != nil,
 			"port":        m.port,
 			"problem":     m.problem,
-			"key_set":     m.settings.APIKey != "",
+			"connect_url": m.settings.ConnectURL,
 			"storage":     m.settings.Storage,
 			"folder":      m.settings.Folder,
 			"version":     release,

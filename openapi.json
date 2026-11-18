@@ -10,7 +10,7 @@
       "get": {
         "operationId": "read-status",
         "summary": "Whether the upload listener is serving",
-        "description": "The port the upload API listens on, whether an API key is set, where uploads are stored, and the reason when the listener is not serving.",
+        "description": "The port the upload API listens on, where uploads are stored, the Connect address, and the reason when the listener is not serving.",
         "responses": {
           "200": {
             "description": "The listener's state.",
@@ -19,16 +19,49 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "serving": {"type": "boolean", "description": "Whether the upload API is listening."},
-                    "port": {"type": "integer", "description": "The granted TCP port."},
-                    "problem": {"type": "string", "description": "Why it is not serving, or empty."},
-                    "key_set": {"type": "boolean", "description": "Whether api_key is set."},
-                    "storage": {"type": "string", "description": "The storage uploads go into."},
-                    "folder": {"type": "string", "description": "The folder inside that storage."},
-                    "version": {"type": "string", "description": "This module's version."},
-                    "slicer_host": {"type": "string", "description": "The host address to give the slicer."}
+                    "serving": {
+                      "type": "boolean",
+                      "description": "Whether the upload API is listening."
+                    },
+                    "port": {
+                      "type": "integer",
+                      "description": "The granted TCP port."
+                    },
+                    "problem": {
+                      "type": "string",
+                      "description": "Why it is not serving, or empty."
+                    },
+                    "storage": {
+                      "type": "string",
+                      "description": "The storage uploads go into."
+                    },
+                    "folder": {
+                      "type": "string",
+                      "description": "The folder inside that storage."
+                    },
+                    "version": {
+                      "type": "string",
+                      "description": "This module's version."
+                    },
+                    "slicer_host": {
+                      "type": "string",
+                      "description": "The host address to give the slicer."
+                    },
+                    "connect_url": {
+                      "type": "string",
+                      "description": "Where the module reaches Prusa Connect's API."
+                    }
                   },
-                  "required": ["serving", "port", "problem", "key_set", "storage", "folder", "version", "slicer_host"]
+                  "required": [
+                    "serving",
+                    "port",
+                    "problem",
+                    "storage",
+                    "folder",
+                    "version",
+                    "slicer_host",
+                    "connect_url"
+                  ]
                 }
               }
             }

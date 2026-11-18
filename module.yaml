@@ -8,7 +8,9 @@
 # Why a port of its own rather than routes under /api/v1/modules/...: the host
 # caps a body through the module mount at 1 MiB, and it authorizes those routes
 # with Connect's own session or bearer token before the module sees them, while
-# a slicer uploads files of many MiB with an OctoPrint X-Api-Key header.
+# a slicer uploads files of many MiB with an OctoPrint X-Api-Key header. The
+# X-Api-Key is a Prusa Connect API credential, which the module passes on as a
+# bearer token.
 
 name: octoprint-upload
 title: OctoPrint upload for slicers
@@ -21,21 +23,11 @@ openapi: openapi.json
 
 require:
   core: ">=0.1.0-beta.1"
-  core-device.list: "*"
-  core-device.print: "*"
-  core-storage.write: "*"
 
-# What the module does as itself, with no person behind the call: it is
-# called by a slicer that authenticated with this module's own API key.
-permissions:
-  # find the printer an upload is for
-  - observe
-  # store the uploaded G-code in a storage of this server
-  - write_storage
-  # read that file back when sending it to the printer
-  - read_storage
-  # start the print on the printer
-  - operate
+# No permissions: the module never acts as itself. Every call it makes to
+# Prusa Connect carries the API credential the slicer sent, so Connect decides
+# what that person may store and print, exactly as in the web app, and its
+# audit names that person. Nothing has to be granted to the module.
 
 needs:
   listen:
@@ -43,14 +35,14 @@ needs:
       tcp: 17481
       why: the OctoPrint-compatible upload API a slicer connects to
   # Holds an upload while it arrives, so its size is known before it is
-  # written into the storage. Nothing is kept there afterwards.
+  # sent on to Connect. Nothing is kept there afterwards.
   data: true
 
 options:
-  - key: api_key
-    type: secret
-    default: ""
-    summary: The key the slicer sends (PrusaSlicer's "API Key" field). Nothing is accepted until it is set.
+  - key: connect_url
+    type: url
+    default: "http://127.0.0.1:8080"
+    summary: Where this module reaches Prusa Connect's API. The default is the server it runs inside.
   - key: storage
     type: string
     default: "local"

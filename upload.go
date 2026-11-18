@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,9 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/prusa3d/prusa-connect/sdk/deviceapi"
 	"github.com/prusa3d/prusa-connect/sdk/storageapi"
 )
 
@@ -44,11 +41,14 @@ func (m *module) uploadRoutes() http.Handler {
 }
 
 func (m *module) version(w http.ResponseWriter, r *http.Request) {
-	if !m.authorized(w, r) {
+	token, ok := credential(w, r)
+	if !ok {
 		return
 	}
 
-	device, err := m.findPrinter(r, r.PathValue("printer"))
+	_, connect, _ := m.current()
+
+	found, err := findPrinter(r, connect, token, r.PathValue("printer"))
 	if err != nil {
 		m.fail(w, r, err)
 
@@ -58,31 +58,32 @@ func (m *module) version(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"api":    "0.1",
 		"server": octoPrintVersion,
-		"text":   fmt.Sprintf("OctoPrint %s (Prusa Connect %s %s for %s)", octoPrintVersion, name, release, printerLabel(device)),
+		"text":   fmt.Sprintf("OctoPrint %s (Prusa Connect %s %s for %s)", octoPrintVersion, name, release, printerLabel(found)),
 	})
 }
 
-// upload is OctoPrint's POST /api/files/local: a multipart form with the file
-// and, optionally, "print" (start it) and "path" (a folder). The file is kept
-// in the server's storage either way; with print it is also sent to the
-// printer and started.
+// upload is OctoPrint's POST /api/files/local: a multipart form with "print",
+// "path" and the file (PrusaSlicer 2.9 sends them in that order). The file is
+// kept in the server's storage either way; with print it is also sent to the
+// printer, replacing a file of that name there, and started.
 func (m *module) upload(w http.ResponseWriter, r *http.Request) {
-	if !m.authorized(w, r) {
+	token, ok := credential(w, r)
+	if !ok {
 		return
 	}
 
-	settings, dataDir := m.current()
+	settings, connect, dataDir := m.current()
 
-	device, err := m.findPrinter(r, r.PathValue("printer"))
+	found, err := findPrinter(r, connect, token, r.PathValue("printer"))
 	if err != nil {
 		m.fail(w, r, err)
 
 		return
 	}
 
-	form, err := receiveForm(r, filepath.Join(dataDir, incomingFolder))
-	if form.held != "" {
-		defer os.Remove(form.held)
+	received, err := receiveForm(r, filepath.Join(dataDir, incomingFolder))
+	if received.held != "" {
+		defer os.Remove(received.held)
 	}
 
 	if err != nil {
@@ -91,9 +92,7 @@ func (m *module) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stored := path.Join(settings.Folder, form.folder, form.filename)
-
-	held, err := os.Open(form.held)
+	held, err := os.Open(received.held)
 	if err != nil {
 		m.fail(w, r, err)
 
@@ -101,28 +100,31 @@ func (m *module) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer held.Close()
 
-	written, err := m.files.Write(r.Context(), storageapi.WriteParams{
-		Storage: settings.Storage,
-		Path:    stored,
-		Size:    form.size,
-	}, held)
+	relative := path.Join(received.folder, received.filename)
+
+	saved, err := connect.store(r.Context(), token, settings.Storage, path.Join(settings.Folder, relative), held, received.size)
 	if err != nil {
-		m.fail(w, r, fmt.Errorf("store %s in storage %q: %w", stored, settings.Storage, err))
+		m.fail(w, r, fmt.Errorf("store the file in Prusa Connect: %w", err))
 
 		return
 	}
 
-	logged := []any{"printer", printerLabel(device), "file", written.Path, "bytes", written.Size, "print", form.print}
+	logged := []any{"printer", printerLabel(found), "file", saved.Path, "bytes", saved.Bytes, "print", received.print}
 
-	if form.print {
-		onPrinter, started, printErr := m.print(r, device.ID, settings, written.Path, path.Join(form.folder, form.filename))
+	if received.print {
+		started, printErr := connect.print(r.Context(), token, found.ID, printRequest{
+			Storage: settings.Storage,
+			Source:  saved.Path,
+			Path:    path.Join(settings.PrinterStorage, relative),
+			Replace: true,
+		})
 		if printErr != nil {
-			m.fail(w, r, printErr)
+			m.fail(w, r, fmt.Errorf("start the print: %w", printErr))
 
 			return
 		}
 
-		logged = append(logged, "printer_path", onPrinter, "transfer", started.TransferID)
+		logged = append(logged, "printer_path", started.Path)
 	}
 
 	m.log.Info("uploaded", logged...)
@@ -131,89 +133,70 @@ func (m *module) upload(w http.ResponseWriter, r *http.Request) {
 		"done": true,
 		"files": map[string]any{
 			"local": map[string]any{
-				"name":   form.filename,
-				"path":   path.Join(form.folder, form.filename),
+				"name":   received.filename,
+				"path":   relative,
 				"origin": "local",
-				"refs":   map[string]string{"resource": written.Path},
+				"refs":   map[string]string{"resource": saved.Path},
 			},
 		},
 	})
 }
 
-// print has the server send the stored file to the printer and start it. The
-// SDK has no "replace", so when the printer already holds a file of that name
-// it retries once under a name with the time in it.
-func (m *module) print(r *http.Request, deviceID string, settings Settings, source, wanted string) (string, deviceapi.Started, error) {
-	onPrinter := path.Join(settings.PrinterStorage, wanted)
+// credential reads the slicer's API key, which is a Prusa Connect API
+// credential: the module acts as the person who created it.
+func credential(w http.ResponseWriter, r *http.Request) (string, bool) {
+	token := strings.TrimSpace(r.Header.Get("X-Api-Key"))
+	if token == "" {
+		http.Error(w, "missing API key: create an API credential in Prusa Connect (Settings > API credentials) "+
+			"and put it in the slicer's API key field", http.StatusUnauthorized)
 
-	params := deviceapi.PrintParams{ID: deviceID, Storage: settings.Storage, Source: source, Path: onPrinter}
-
-	started, err := m.devices.Print(r.Context(), params)
-	if errors.Is(err, deviceapi.ErrNameTaken) {
-		extension := path.Ext(wanted)
-		params.Path = path.Join(settings.PrinterStorage,
-			strings.TrimSuffix(wanted, extension)+time.Now().Format("_150405")+extension)
-		started, err = m.devices.Print(r.Context(), params)
+		return "", false
 	}
 
-	if err != nil {
-		return "", deviceapi.Started{}, fmt.Errorf("start the print: %w", err)
-	}
-
-	return params.Path, started, nil
+	return token, true
 }
 
-// authorized checks the slicer's X-Api-Key against the module's api_key.
-func (m *module) authorized(w http.ResponseWriter, r *http.Request) bool {
-	settings, _ := m.current()
-
-	if settings.APIKey == "" {
-		http.Error(w, "this module has no api_key set yet: set it on the module's settings in Prusa Connect", http.StatusServiceUnavailable)
-
-		return false
+// findPrinter resolves the path segment to a printer the person may see: its
+// id, its name compared without case, spaces or punctuation, or a unique
+// prefix of that name. With no segment it takes the only printer, if there is
+// exactly one.
+func findPrinter(r *http.Request, connect *connectClient, token, wanted string) (device, error) {
+	if connect == nil {
+		return device{}, &httpError{http.StatusServiceUnavailable, "the module has not been configured yet"}
 	}
 
-	sent := strings.TrimSpace(r.Header.Get("X-Api-Key"))
-	if sent == "" || subtle.ConstantTimeCompare([]byte(sent), []byte(settings.APIKey)) != 1 {
-		http.Error(w, "wrong or missing API key", http.StatusForbidden)
-
-		return false
-	}
-
-	return true
-}
-
-// findPrinter resolves the path segment to a printer: its id, or its name
-// compared without case, spaces or punctuation. With no segment it takes the
-// only printer, if there is exactly one.
-func (m *module) findPrinter(r *http.Request, wanted string) (deviceapi.Device, error) {
-	page, err := m.devices.List(r.Context(), deviceapi.ListParams{Limit: 100})
+	printers, err := connect.devices(r.Context(), token)
 	if err != nil {
-		return deviceapi.Device{}, fmt.Errorf("list the printers: %w", err)
+		return device{}, err
+	}
+
+	if len(printers) == 0 {
+		return device{}, &httpError{http.StatusNotFound, "this API credential sees no printers in Prusa Connect"}
 	}
 
 	if wanted == "" {
-		if len(page.Items) == 1 {
-			return page.Items[0], nil
+		if len(printers) == 1 {
+			return printers[0], nil
 		}
 
-		return deviceapi.Device{}, &httpError{http.StatusNotFound,
-			"there are " + fmt.Sprint(len(page.Items)) + " printers; put one in the host address, e.g. /" + slug(namesOf(page.Items)[0]) + " (printers: " + strings.Join(namesOf(page.Items), ", ") + ")"}
+		return device{}, &httpError{http.StatusNotFound,
+			"there are " + fmt.Sprint(len(printers)) + " printers; put one in the host address, e.g. /" +
+				slug(printerLabel(printers[0])) + " (printers: " + strings.Join(namesOf(printers), ", ") + ")"}
 	}
 
-	for _, device := range page.Items {
-		if device.ID == wanted || slug(device.Name) == slug(wanted) {
-			return device, nil
+	for _, candidate := range printers {
+		if candidate.ID == wanted || slug(candidate.Name) == slug(wanted) {
+			return candidate, nil
 		}
 	}
 
-	// A unique prefix also names a printer: Connect names a printer after its
-	// model and serial ("COREONE <serial>"), and "core-one" should find it.
-	var prefixed []deviceapi.Device
+	// Connect names a printer after its model and serial ("COREONE <serial>"),
+	// so a unique prefix ("core-one") also names it.
+	var prefixed []device
 
-	for _, device := range page.Items {
-		if slug(wanted) != "" && strings.HasPrefix(slug(device.Name), slug(wanted)) {
-			prefixed = append(prefixed, device)
+	for _, candidate := range printers {
+		if slug(wanted) != "" && strings.HasPrefix(slug(candidate.Name), slug(wanted)) {
+			prefixed = append(prefixed, candidate)
 		}
 	}
 
@@ -221,8 +204,8 @@ func (m *module) findPrinter(r *http.Request, wanted string) (deviceapi.Device, 
 		return prefixed[0], nil
 	}
 
-	return deviceapi.Device{}, &httpError{http.StatusNotFound,
-		"no printer named " + strconv.Quote(wanted) + " (printers: " + strings.Join(namesOf(page.Items), ", ") + ")"}
+	return device{}, &httpError{http.StatusNotFound,
+		"no printer named " + strconv.Quote(wanted) + " (printers: " + strings.Join(namesOf(printers), ", ") + ")"}
 }
 
 // form is one OctoPrint upload as received.
@@ -375,14 +358,20 @@ func (m *module) fail(w http.ResponseWriter, r *http.Request, err error) {
 
 	var refusal *httpError
 
+	var connectRefusal *connectError
+
 	switch {
 	case errors.As(err, &refusal):
 		status = refusal.status
-	case errors.Is(err, deviceapi.ErrDenied):
-		status = http.StatusForbidden
-		err = fmt.Errorf("%w (grant this module operate on the printer, and read_storage/write_storage on the storage)", err)
-	case errors.Is(err, deviceapi.ErrNoFile):
-		status = http.StatusNotFound
+	case errors.As(err, &connectRefusal):
+		status = connectRefusal.Status
+
+		switch connectRefusal.Status {
+		case http.StatusUnauthorized:
+			err = fmt.Errorf("Prusa Connect does not accept this API key: use an API credential from Settings > API credentials (%w)", err)
+		case http.StatusForbidden:
+			err = fmt.Errorf("Prusa Connect refused this API credential: it needs permission to upload files and operate this printer (%w)", err)
+		}
 	}
 
 	m.log.Warn("request refused", "path", r.URL.Path, "status", status, "err", err)
@@ -395,18 +384,18 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func printerLabel(device deviceapi.Device) string {
-	if device.Name != "" {
-		return device.Name
+func printerLabel(printer device) string {
+	if printer.Name != "" {
+		return printer.Name
 	}
 
-	return device.ID
+	return printer.ID
 }
 
-func namesOf(devices []deviceapi.Device) []string {
-	names := make([]string, 0, len(devices))
-	for _, device := range devices {
-		names = append(names, printerLabel(device))
+func namesOf(printers []device) []string {
+	names := make([]string, 0, len(printers))
+	for _, printer := range printers {
+		names = append(names, printerLabel(printer))
 	}
 
 	if len(names) == 0 {
