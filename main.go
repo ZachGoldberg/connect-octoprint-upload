@@ -5,9 +5,10 @@
 // The slicer talks to a port of the module's own, granted by the operator at
 // install (see module.yaml for why it is not a route under the host's API). An
 // upload is held in the module's data directory until it has fully arrived,
-// written into a storage of the server with storage.write, and, when the
-// slicer asks, printed with device.print, which has the server send the file
-// to the printer and start it.
+// then stored through Connect's HTTP API and, when the slicer asks, printed,
+// which has the server send the file to the printer and start it. Every call
+// to Connect carries the slicer's API key, a Prusa Connect API credential, so
+// Connect authorizes it as that person; the module holds no permissions.
 package main
 
 import (

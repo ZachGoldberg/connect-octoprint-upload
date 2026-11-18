@@ -218,7 +218,8 @@ type form struct {
 }
 
 // receiveForm reads the multipart body, copying the file part into a file
-// under incoming, because storage.write needs the size before the bytes.
+// under incoming, because Connect's storage upload needs the size before the
+// bytes.
 func receiveForm(r *http.Request, incoming string) (form, error) {
 	var received form
 
@@ -239,7 +240,11 @@ func receiveForm(r *http.Request, incoming string) (form, error) {
 
 		switch part.FormName() {
 		case "file":
-			err = holdFile(part, incoming, &received)
+			if received.held != "" {
+				err = &httpError{http.StatusBadRequest, "an upload carries one file"}
+			} else {
+				err = holdFile(part, incoming, &received)
+			}
 		case "print":
 			received.print, err = readBool(part)
 		case "path":

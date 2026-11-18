@@ -498,3 +498,41 @@ func keys(stored map[string][]byte) []string {
 
 	return names
 }
+
+// TestSecondFilePartIsRefused checks that a form with two file parts is
+// refused and leaves nothing behind: the first part's held copy used to be
+// forgotten when the second replaced it.
+func TestSecondFilePartIsRefused(t *testing.T) {
+	fake, connect := newFakeConnect(t, coreOne)
+	_, server, dataDir := newTestModule(t, connect.URL)
+
+	var body bytes.Buffer
+
+	writer := multipart.NewWriter(&body)
+
+	for _, filename := range []string{"first.gcode", "second.gcode"} {
+		part, err := writer.CreateFormFile("file", filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err = part.Write([]byte("G28\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	status, answer := send(t, http.MethodPost, server.URL+"/api/files/local", goodToken, writer.FormDataContentType(), &body)
+	if status != http.StatusBadRequest || !strings.Contains(answer, "one file") {
+		t.Fatalf("two file parts: %d %s", status, answer)
+	}
+
+	if len(fake.stored) != 0 {
+		t.Fatalf("stored %v", keys(fake.stored))
+	}
+
+	assertNoLeftovers(t, dataDir)
+}
