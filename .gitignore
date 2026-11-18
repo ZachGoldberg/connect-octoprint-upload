@@ -1,3 +1,10 @@
+# The Prusa Connect checkout the SDK builds from (make core).
 .core
+# Build output.
+/release/
 /dist/
+/bin/
+/connect-octoprint-upload
 octoprint-upload_*
+# Drafts of upstream comments, reviewed and posted by hand.
+/drafts/
