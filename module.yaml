@@ -1,0 +1,70 @@
+# Manifest for octoprint-upload, a Prusa Connect service module.
+#
+# It lets PrusaSlicer 2.x (and any slicer that speaks OctoPrint's upload API)
+# send G-code straight into a self-hosted Prusa Connect: PrusaSlicer's own
+# "Prusa Connect" host type only reaches the cloud service
+# (https://github.com/prusa3d/prusa-connect/issues/7, #24).
+#
+# Why a port of its own rather than routes under /api/v1/modules/...: the host
+# caps a body through the module mount at 1 MiB, and it authorizes those routes
+# with Connect's own session or bearer token before the module sees them, while
+# a slicer uploads files of many MiB with an OctoPrint X-Api-Key header.
+
+name: octoprint-upload
+title: OctoPrint upload for slicers
+summary: Lets PrusaSlicer 2.x send and print G-code through this server using its OctoPrint host type.
+kind: sink
+version: 0.1.0
+license: MIT
+contract_major: 1
+openapi: openapi.json
+
+require:
+  core: ">=0.1.0-beta.1"
+  core-device.list: "*"
+  core-device.print: "*"
+  core-storage.write: "*"
+
+# What the module does as itself, with no person behind the call: it is
+# called by a slicer that authenticated with this module's own API key.
+permissions:
+  # find the printer an upload is for
+  - observe
+  # store the uploaded G-code in a storage of this server
+  - write_storage
+  # read that file back when sending it to the printer
+  - read_storage
+  # start the print on the printer
+  - operate
+
+needs:
+  listen:
+    - name: octoprint
+      tcp: 17481
+      why: the OctoPrint-compatible upload API a slicer connects to
+  # Holds an upload while it arrives, so its size is known before it is
+  # written into the storage. Nothing is kept there afterwards.
+  data: true
+
+options:
+  - key: api_key
+    type: secret
+    default: ""
+    summary: The key the slicer sends (PrusaSlicer's "API Key" field). Nothing is accepted until it is set.
+  - key: storage
+    type: string
+    default: "local"
+    summary: The storage of this server that keeps uploaded files.
+  - key: folder
+    type: string
+    default: "slicer-uploads"
+    summary: The folder inside that storage the uploads go into.
+  - key: printer_storage
+    type: string
+    default: "usb"
+    summary: The printer's own storage the file is sent to when the slicer asks to print it.
+
+platforms:
+  - linux_amd64
+  - linux_arm64
+  - linux_arm

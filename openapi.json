@@ -1,0 +1,40 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "octoprint-upload",
+    "version": "0.1.0",
+    "description": "The routes octoprint-upload serves under its mount. Uploads do not come through here: the slicer talks to the module's own port, which serves OctoPrint's GET /api/version and POST /api/files/local."
+  },
+  "paths": {
+    "/status": {
+      "get": {
+        "operationId": "read-status",
+        "summary": "Whether the upload listener is serving",
+        "description": "The port the upload API listens on, whether an API key is set, where uploads are stored, and the reason when the listener is not serving.",
+        "responses": {
+          "200": {
+            "description": "The listener's state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serving": {"type": "boolean", "description": "Whether the upload API is listening."},
+                    "port": {"type": "integer", "description": "The granted TCP port."},
+                    "problem": {"type": "string", "description": "Why it is not serving, or empty."},
+                    "key_set": {"type": "boolean", "description": "Whether api_key is set."},
+                    "storage": {"type": "string", "description": "The storage uploads go into."},
+                    "folder": {"type": "string", "description": "The folder inside that storage."},
+                    "version": {"type": "string", "description": "This module's version."},
+                    "slicer_host": {"type": "string", "description": "The host address to give the slicer."}
+                  },
+                  "required": ["serving", "port", "problem", "key_set", "storage", "folder", "version", "slicer_host"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
