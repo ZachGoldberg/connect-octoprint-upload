@@ -213,7 +213,7 @@ uses a checkout of Prusa Connect at `CORE_REF` in `.core/` (`go.mod` points ther
 
 ```bash
 make check     # go vet and the tests
-make release   # release/: module.yaml, openapi.json, docs, one binary per platform in module.yaml
+make release   # release/: module.yaml, docs, one binary per platform in module.yaml
 make dist      # release/ plus checksums.txt, packed as dist/octoprint-upload-<version>.tar.gz
 make install   # installs release/ into a throwaway Connect config in bin/try
 ```

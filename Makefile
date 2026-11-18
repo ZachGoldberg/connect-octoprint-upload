@@ -43,7 +43,7 @@ check: core
 release: core
 	rm -rf $(RELEASE)
 	mkdir -p $(RELEASE)
-	cp module.yaml openapi.json LICENSE README.md CHANGELOG.md $(RELEASE)/
+	cp module.yaml LICENSE README.md CHANGELOG.md $(RELEASE)/
 	@for platform in $(PLATFORMS); do \
 		goos=$${platform%%_*}; goarch=$${platform#*_}; \
 		binary=$(NAME)_$$platform; [ $$goos = windows ] && binary=$$binary.exe; \
