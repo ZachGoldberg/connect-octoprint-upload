@@ -3,6 +3,15 @@
 What an operator sees change when they upgrade this module, newest release
 first. `version:` in `module.yaml` is the newest heading below.
 
+## 0.1.1 - 2026-11-19
+
+### Changed
+
+- `module.yaml` declares the module's one outside connection under `egress`: the process calls
+  the Prusa Connect API at `connect_url` and sends it the upload and the person's API credential,
+  so the operator sees that at install. The code is unchanged.
+- The README's Security section says the upload port is plain HTTP on every interface.
+
 ## 0.1.0 - 2026-11-18
 
 ### Added

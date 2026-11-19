@@ -44,8 +44,8 @@ Download `octoprint-upload-<version>.tar.gz` from the
 `make dist` (see [Build](#build)). Then, on the Connect server:
 
 ```bash
-prusa-connect module add github.com/zachgoldberg/connect-octoprint-upload@0.1.0 \
-  -from octoprint-upload-0.1.0.tar.gz -approve -approve-listen
+prusa-connect module add github.com/zachgoldberg/connect-octoprint-upload@0.1.1 \
+  -from octoprint-upload-0.1.1.tar.gz -approve -approve-listen
 ```
 
 `-approve` switches the extension on and grants its data folder. `-approve-listen` grants the
@@ -172,9 +172,13 @@ install, and serves the OctoPrint API there.
   its audit log names that person. A Read-scoped or revoked credential can't upload.
 - **The extension holds nothing.** It declares no permissions, is granted no roles, and stores
   no keys. The only things it asks for are the port and a data folder for uploads in progress.
-- **The port is plain HTTP.** Like OctoPrint on a LAN, the API key and the G-code cross the
-  network unencrypted. Use it on a network you trust, or put a TLS-terminating proxy in front and
-  point PrusaSlicer at that. Don't expose the port to the internet.
+- **It connects to one place: `connect_url`.** That's its `egress` entry, which `module add` shows
+  at install. The upload and the person's API credential go there, so point `connect_url` only at
+  your own Prusa Connect server.
+- **The port is plain HTTP on every network interface.** Like OctoPrint on a LAN, the API key and
+  the G-code cross the network unencrypted, readable by anyone who can watch that traffic. Use it
+  on a network you trust, or put a TLS-terminating proxy in front and point PrusaSlicer at that.
+  Don't expose the port to the internet; firewall it to the machines that run the slicer.
 - The port answers without a key only for `GET /healthz`. Every other request needs a credential
   Connect accepts.
 

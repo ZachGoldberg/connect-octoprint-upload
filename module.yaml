@@ -18,7 +18,7 @@ summary: Lets PrusaSlicer 2.x send and print G-code through this server using it
 codeowner: Zach Goldberg
 issue_tracker: https://github.com/ZachGoldberg/connect-octoprint-upload/issues
 kind: sink
-version: 0.1.0
+version: 0.1.1
 license: MIT
 contract_major: 1
 openapi: openapi.json
@@ -57,6 +57,17 @@ options:
     type: string
     default: "usb"
     summary: The printer's own storage the file is sent to when the slicer asks to print it.
+
+# The one connection the process makes: Prusa Connect's HTTP API at
+# connect_url, by default this same server on port 8080. The person's API
+# credential goes there, so an operator who points connect_url elsewhere
+# sends it to that host.
+egress:
+  - option: connect_url
+    ports: [8080, 80, 443]
+    from: process
+    why: Calls this server's Prusa Connect API as the person whose API key the slicer sent.
+    sends: The uploaded file and the person's API credential.
 
 # The platforms a release ships a binary for, each a GOOS_GOARCH pair: the
 # ones Prusa's own extensions ship, plus 32-bit ARM for older Raspberry Pis.
