@@ -33,8 +33,9 @@ This project is not affiliated with or endorsed by Prusa Research.
 
 ### From the marketplace
 
-Once a release is published to the [Prusa Plugin Marketplace](https://plugin-marketplace.prusa3d.com),
-it is offered on **Settings → Extensions**. The extension asks to listen on TCP port 17481 and for
+The extension is on the
+[Prusa Plugin Marketplace](https://plugin-marketplace.prusa3d.com/connect/extensions/com.github.aux.zachgoldberg.connect-octoprint-upload). Install
+**OctoPrint upload for slicers** from **Settings → Extensions**. The extension asks to listen on TCP port 17481 and for
 a data folder; approve both.
 
 ### By hand, from a release
